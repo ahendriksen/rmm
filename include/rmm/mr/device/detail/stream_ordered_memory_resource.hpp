@@ -200,8 +200,6 @@ class stream_ordered_memory_resource : public crtp<PoolResource>, public device_
    */
   void* do_allocate(std::size_t size, cuda_stream_view stream) override
   {
-    RMM_LOG_TRACE("[A][stream {:p}][{}B]", fmt::ptr(stream.value()), size);
-
     if (size <= 0) { return nullptr; }
 
     lock_guard lock(mtx_);
@@ -214,10 +212,6 @@ class stream_ordered_memory_resource : public crtp<PoolResource>, public device_
                 "Maximum allocation size exceeded");
     auto const block = this->underlying().get_block(size, stream_event);
 
-    RMM_LOG_TRACE("[A][stream {:p}][{}B][{:p}]",
-                  fmt::ptr(stream_event.stream),
-                  size,
-                  fmt::ptr(block.pointer()));
 
     log_summary_trace();
 
@@ -235,8 +229,6 @@ class stream_ordered_memory_resource : public crtp<PoolResource>, public device_
    */
   void do_deallocate(void* ptr, std::size_t size, cuda_stream_view stream) override
   {
-    RMM_LOG_TRACE("[D][stream {:p}][{}B][{:p}]", fmt::ptr(stream.value()), size, ptr);
-
     if (size <= 0 || ptr == nullptr) { return; }
 
     lock_guard lock(mtx_);
@@ -391,11 +383,6 @@ class stream_ordered_memory_resource : public crtp<PoolResource>, public device_
       if (merge_first) {
         merge_lists(stream_event, blocks, other_event, std::move(other_blocks));
 
-        RMM_LOG_DEBUG("[A][Stream {:p}][{}B][Merged stream {:p}]",
-                      fmt::ptr(stream_event.stream),
-                      size,
-                      fmt::ptr(iter->first.stream));
-
         stream_free_blocks_.erase(iter);
 
         block_type const block = blocks.get_block(size);  // get the best fit block in merged lists
@@ -421,11 +408,6 @@ class stream_ordered_memory_resource : public crtp<PoolResource>, public device_
         block_type const block = find_block(iter);
 
         if (block.is_valid()) {
-          RMM_LOG_DEBUG((merge_first) ? "[A][Stream {:p}][{}B][Found after merging stream {:p}]"
-                                      : "[A][Stream {:p}][{}B][Taken from stream {:p}]",
-                        fmt::ptr(stream_event.stream),
-                        size,
-                        fmt::ptr(iter->first.stream));
           return block;
         }
       }
@@ -478,11 +460,7 @@ class stream_ordered_memory_resource : public crtp<PoolResource>, public device_
                     max_block    = std::max(summary.first, max_block);
                     free_mem += summary.second;
                   });
-    RMM_LOG_TRACE("[Summary][Free lists: {}][Blocks: {}][Max Block: {}][Total Free: {}]",
-                  stream_free_blocks_.size(),
-                  num_blocks,
-                  max_block,
-                  free_mem);
+
 #endif
   }
 

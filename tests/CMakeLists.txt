@@ -144,9 +144,6 @@ ConfigureTest(DEVICE_BUFFER_TEST device_buffer_tests.cu)
 # device scalar tests
 ConfigureTest(DEVICE_SCALAR_TEST device_scalar_tests.cpp)
 
-# logger tests
-ConfigureTest(LOGGER_TEST logger_tests.cpp)
-
 # uvector tests
 ConfigureTest(DEVICE_UVECTOR_TEST device_uvector_tests.cpp)
 

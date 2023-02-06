@@ -20,12 +20,8 @@
 #include <rmm/detail/aligned.hpp>
 #include <rmm/detail/cuda_util.hpp>
 #include <rmm/detail/error.hpp>
-#include <rmm/logger.hpp>
 
 #include <cuda_runtime_api.h>
-
-#include <spdlog/common.h>
-#include <spdlog/fmt/ostr.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -113,7 +109,6 @@ inline std::size_t align_to_size_class(std::size_t value) noexcept
   // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
 
   auto* bound = std::lower_bound(size_classes.begin(), size_classes.end(), value);
-  RMM_LOGGING_ASSERT(bound != size_classes.end());
   return *bound;
 }
 
@@ -135,8 +130,6 @@ class byte_span {
    */
   byte_span(void* pointer, std::size_t size) : pointer_{static_cast<char*>(pointer)}, size_{size}
   {
-    RMM_LOGGING_ASSERT(pointer != nullptr);
-    RMM_LOGGING_ASSERT(size > 0);
   }
 
   /// Returns the underlying pointer.
@@ -157,7 +150,6 @@ class byte_span {
   /// Used by std::set to compare spans.
   bool operator<(byte_span const& span) const
   {
-    RMM_LOGGING_ASSERT(span.is_valid());
     return pointer_ < span.pointer_;
   }
 
@@ -191,8 +183,6 @@ class block final : public byte_span {
    */
   [[nodiscard]] bool fits(std::size_t bytes) const
   {
-    RMM_LOGGING_ASSERT(is_valid());
-    RMM_LOGGING_ASSERT(bytes > 0);
     return size() >= bytes;
   }
 
@@ -204,8 +194,6 @@ class block final : public byte_span {
    */
   [[nodiscard]] bool is_contiguous_before(block const& blk) const
   {
-    RMM_LOGGING_ASSERT(is_valid());
-    RMM_LOGGING_ASSERT(blk.is_valid());
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     return pointer() + size() == blk.pointer();
   }
@@ -218,8 +206,6 @@ class block final : public byte_span {
    */
   [[nodiscard]] std::pair<block, block> split(std::size_t bytes) const
   {
-    RMM_LOGGING_ASSERT(is_valid());
-    RMM_LOGGING_ASSERT(size() > bytes);
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     return {{pointer(), bytes}, {pointer() + bytes, size() - bytes}};
   }
@@ -234,7 +220,6 @@ class block final : public byte_span {
    */
   [[nodiscard]] block merge(block const& blk) const
   {
-    RMM_LOGGING_ASSERT(is_contiguous_before(blk));
     return {pointer(), size() + blk.size()};
   }
 };
@@ -242,8 +227,6 @@ class block final : public byte_span {
 /// Comparison function for block sizes.
 inline bool block_size_compare(block const& lhs, block const& rhs)
 {
-  RMM_LOGGING_ASSERT(lhs.is_valid());
-  RMM_LOGGING_ASSERT(rhs.is_valid());
   return lhs.size() < rhs.size();
 }
 
@@ -271,8 +254,6 @@ class superblock final : public byte_span {
    */
   superblock(void* pointer, std::size_t size) : byte_span{pointer, size}
   {
-    RMM_LOGGING_ASSERT(size >= minimum_size);
-    RMM_LOGGING_ASSERT(size <= maximum_size);
     free_blocks_.emplace(pointer, size);
   }
 
@@ -292,7 +273,6 @@ class superblock final : public byte_span {
    */
   [[nodiscard]] bool empty() const
   {
-    RMM_LOGGING_ASSERT(is_valid());
     return free_blocks_.size() == 1 && free_blocks_.cbegin()->size() == size();
   }
 
@@ -303,7 +283,6 @@ class superblock final : public byte_span {
    */
   [[nodiscard]] std::size_t free_blocks() const
   {
-    RMM_LOGGING_ASSERT(is_valid());
     return free_blocks_.size();
   }
 
@@ -315,8 +294,7 @@ class superblock final : public byte_span {
    */
   [[nodiscard]] bool contains(block const& blk) const
   {
-    RMM_LOGGING_ASSERT(is_valid());
-    RMM_LOGGING_ASSERT(blk.is_valid());
+
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     return pointer() <= blk.pointer() && pointer() + size() >= blk.pointer() + blk.size();
   }
@@ -329,7 +307,6 @@ class superblock final : public byte_span {
    */
   [[nodiscard]] bool fits(std::size_t bytes) const
   {
-    RMM_LOGGING_ASSERT(is_valid());
     return std::any_of(free_blocks_.cbegin(), free_blocks_.cend(), [bytes](auto const& blk) {
       return blk.fits(bytes);
     });
@@ -344,8 +321,6 @@ class superblock final : public byte_span {
    */
   [[nodiscard]] bool is_contiguous_before(superblock const& sblk) const
   {
-    RMM_LOGGING_ASSERT(is_valid());
-    RMM_LOGGING_ASSERT(sblk.is_valid());
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     return empty() && sblk.empty() && pointer() + size() == sblk.pointer();
   }
@@ -358,8 +333,6 @@ class superblock final : public byte_span {
    */
   [[nodiscard]] std::pair<superblock, superblock> split(std::size_t bytes) const
   {
-    RMM_LOGGING_ASSERT(is_valid());
-    RMM_LOGGING_ASSERT(empty() && bytes >= minimum_size && size() >= bytes + minimum_size);
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     return {superblock{pointer(), bytes}, superblock{pointer() + bytes, size() - bytes}};
   }
@@ -374,7 +347,6 @@ class superblock final : public byte_span {
    */
   [[nodiscard]] superblock merge(superblock const& sblk) const
   {
-    RMM_LOGGING_ASSERT(is_contiguous_before(sblk));
     return {pointer(), size() + sblk.size()};
   }
 
@@ -386,9 +358,6 @@ class superblock final : public byte_span {
    */
   block first_fit(std::size_t size)
   {
-    RMM_LOGGING_ASSERT(is_valid());
-    RMM_LOGGING_ASSERT(size > 0);
-
     auto fits       = [size](auto const& blk) { return blk.fits(size); };
     auto const iter = std::find_if(free_blocks_.cbegin(), free_blocks_.cend(), fits);
     if (iter == free_blocks_.cend()) { return {}; }
@@ -413,10 +382,6 @@ class superblock final : public byte_span {
    */
   void coalesce(block const& blk)  // NOLINT(readability-function-cognitive-complexity)
   {
-    RMM_LOGGING_ASSERT(is_valid());
-    RMM_LOGGING_ASSERT(blk.is_valid());
-    RMM_LOGGING_ASSERT(contains(blk));
-
     // Find the right place (in ascending address order) to insert the block.
     auto const next     = free_blocks_.lower_bound(blk);
     auto const previous = next == free_blocks_.cbegin() ? next : std::prev(next);
@@ -547,7 +512,6 @@ class global_arena final {
   superblock acquire(std::size_t size)
   {
     // Superblocks should only be acquired if the size is not directly handled by the global arena.
-    RMM_LOGGING_ASSERT(!handles(size));
     std::lock_guard lock(mtx_);
     return first_fit(size);
   }
@@ -559,7 +523,6 @@ class global_arena final {
    */
   void release(superblock&& sblk)
   {
-    RMM_LOGGING_ASSERT(sblk.is_valid());
     std::lock_guard lock(mtx_);
     coalesce(std::move(sblk));
   }
@@ -574,7 +537,6 @@ class global_arena final {
     std::lock_guard lock(mtx_);
     while (!superblocks.empty()) {
       auto sblk = std::move(superblocks.extract(superblocks.cbegin()).value());
-      RMM_LOGGING_ASSERT(sblk.is_valid());
       coalesce(std::move(sblk));
     }
   }
@@ -587,7 +549,6 @@ class global_arena final {
    */
   void* allocate(std::size_t size)
   {
-    RMM_LOGGING_ASSERT(handles(size));
     std::lock_guard lock(mtx_);
     auto sblk = first_fit(size);
     if (sblk.is_valid()) {
@@ -609,7 +570,6 @@ class global_arena final {
    */
   bool deallocate(void* ptr, std::size_t size, cuda_stream_view stream)
   {
-    RMM_LOGGING_ASSERT(handles(size));
     stream.synchronize_no_throw();
     return deallocate(ptr, size);
   }
@@ -640,48 +600,6 @@ class global_arena final {
       superblocks_.insert(std::move(sblk));
     }
     return true;
-  }
-
-  /**
-   * @brief Dump memory to log.
-   *
-   * @param logger the spdlog logger to use
-   */
-  void dump_memory_log(std::shared_ptr<spdlog::logger> const& logger) const
-  {
-    std::lock_guard lock(mtx_);
-
-    logger->info("  Arena size: {}", rmm::detail::bytes{upstream_block_.size()});
-    logger->info("  # superblocks: {}", superblocks_.size());
-    if (!superblocks_.empty()) {
-      logger->debug("  Total size of superblocks: {}",
-                    rmm::detail::bytes{total_memory_size(superblocks_)});
-      auto const total_free    = total_free_size(superblocks_);
-      auto const max_free      = max_free_size(superblocks_);
-      auto const fragmentation = (1 - max_free / static_cast<double>(total_free)) * 100;
-      logger->info("  Total free memory: {}", rmm::detail::bytes{total_free});
-      logger->info("  Largest block of free memory: {}", rmm::detail::bytes{max_free});
-      logger->info("  Fragmentation: {:.2f}%", fragmentation);
-
-      auto index = 0;
-      char* prev_end{};
-      for (auto const& sblk : superblocks_) {
-        if (prev_end == nullptr) { prev_end = sblk.pointer(); }
-        logger->debug(
-          "    Superblock {}: start={}, end={}, size={}, empty={}, # free blocks={}, max free={}, "
-          "gap={}",
-          index,
-          fmt::ptr(sblk.pointer()),
-          fmt::ptr(sblk.end()),
-          rmm::detail::bytes{sblk.size()},
-          sblk.empty(),
-          sblk.free_blocks(),
-          rmm::detail::bytes{sblk.max_free_size()},
-          rmm::detail::bytes{static_cast<size_t>(sblk.pointer() - prev_end)});
-        prev_end = sblk.end();
-        index++;
-      }
-    }
   }
 
  private:

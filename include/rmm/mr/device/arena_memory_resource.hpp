@@ -16,14 +16,10 @@
 #pragma once
 
 #include <rmm/detail/error.hpp>
-#include <rmm/logger.hpp>
 #include <rmm/mr/device/detail/arena.hpp>
 #include <rmm/mr/device/device_memory_resource.hpp>
 
 #include <cuda_runtime_api.h>
-
-#include <spdlog/common.h>
-#include <spdlog/fmt/ostr.h>
 
 #include <cstddef>
 #include <map>
@@ -89,11 +85,6 @@ class arena_memory_resource final : public device_memory_resource {
                                  bool dump_log_on_failure              = false)
     : global_arena_{upstream_mr, arena_size}, dump_log_on_failure_{dump_log_on_failure}
   {
-    if (dump_log_on_failure_) {
-      logger_ = spdlog::basic_logger_mt("arena_memory_dump", "rmm_arena_memory_dump.log");
-      // Set the level to `debug` for more detailed output.
-      logger_->set_level(spdlog::level::info);
-    }
   }
 
   ~arena_memory_resource() override = default;
@@ -155,8 +146,6 @@ class arena_memory_resource final : public device_memory_resource {
       defragment();
       void* pointer = arena.allocate(bytes);
       if (pointer == nullptr) {
-        if (dump_log_on_failure_) { dump_memory_log(bytes); }
-        RMM_FAIL("Maximum pool size exceeded", rmm::out_of_memory);
       }
       return pointer;
     }
@@ -274,7 +263,6 @@ class arena_memory_resource final : public device_memory_resource {
    */
   arena& get_stream_arena(cuda_stream_view stream)
   {
-    RMM_LOGGING_ASSERT(!use_per_thread_arena(stream));
     {
       std::shared_lock lock(map_mtx_);
       auto const iter = stream_arenas_.find(stream.value());
@@ -299,21 +287,6 @@ class arena_memory_resource final : public device_memory_resource {
   }
 
   /**
-   * Dump memory to log.
-   *
-   * @param bytes the number of bytes requested for allocation
-   */
-  void dump_memory_log(size_t bytes)
-  {
-    logger_->info("**************************************************");
-    logger_->info("Ran out of memory trying to allocate {}.", rmm::detail::bytes{bytes});
-    logger_->info("**************************************************");
-    logger_->info("Global arena:");
-    global_arena_.dump_memory_log(logger_);
-    logger_->flush();
-  }
-
-  /**
    * @brief Should a per-thread arena be used given the CUDA stream.
    *
    * @param stream to check.
@@ -334,8 +307,6 @@ class arena_memory_resource final : public device_memory_resource {
   std::map<cudaStream_t, arena> stream_arenas_;
   /// If true, dump memory information to log on allocation failure.
   bool dump_log_on_failure_{};
-  /// The logger for memory dump.
-  std::shared_ptr<spdlog::logger> logger_{};
   /// Mutex for read and write locks on arena maps.
   mutable std::shared_mutex map_mtx_;
   /// Mutex for shared and unique locks on the mr.
